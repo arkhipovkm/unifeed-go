@@ -41,7 +41,12 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 
 				re = regexp.MustCompile("^Forwarded from (.*?)\\n\\n")
 				parts = re.FindStringSubmatch(update.CallbackQuery.Message.ReplyToMessage.Text)
-				channelTitle := parts[1]
+				var channelTitle string
+				if len(parts) > 0 {
+					channelTitle = parts[1]
+				} else {
+					channelTitle = channelUsername
+				}
 
 				db.DeleteChatChannel(int(chatID), channelUsername)
 				answerText := fmt.Sprintf("Successfully unsubscribed from %s", channelTitle)
@@ -75,7 +80,12 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 
 				re = regexp.MustCompile("^Forwarded from (.*?)\\n\\n")
 				parts = re.FindStringSubmatch(update.CallbackQuery.Message.ReplyToMessage.Text)
-				channelTitle := parts[1]
+				var channelTitle string
+				if len(parts) > 0 {
+					channelTitle = parts[1]
+				} else {
+					channelTitle = channelUsername
+				}
 
 				db.PutChatChannel(int(chatID), channelUsername)
 				answerText := fmt.Sprintf("Successfully subscribed to %s", channelTitle)
@@ -151,7 +161,12 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 
 				re := regexp.MustCompile("^Forwarded from (.*?)\\n\\n")
 				parts := re.FindStringSubmatch(update.Message.ReplyToMessage.Text)
-				channelTitle := parts[1]
+				var channelTitle string
+				if len(parts) > 0 {
+					channelTitle = parts[1]
+				} else {
+					channelTitle = channelUsername
+				}
 
 				msg := tgbotapi.NewMessage(
 					update.Message.Chat.ID,
