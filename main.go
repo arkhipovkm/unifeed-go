@@ -20,7 +20,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 	var err error
 	unifeedBotToUserChatID, _ := strconv.Atoi(os.Getenv("UNIFEED_BOT_TO_USER_CHAT_ID"))
 	for update := range updates {
-		if update.CallbackQuery != nil {
+		if update.CallbackQuery != nil && update.CallbackQuery.Data != "" && update.CallbackQuery.Message != nil {
 			var chatID int64
 			if update.CallbackQuery.Message != nil &&
 				update.CallbackQuery.Message.Chat != nil &&
@@ -37,6 +37,10 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 			re = regexp.MustCompile("^unsubscribe-(.*?)$")
 			if re.MatchString(update.CallbackQuery.Data) {
 				parts := re.FindStringSubmatch(update.CallbackQuery.Data)
+				if len(parts) == 0 {
+					log.Println("Unsubscribe callback query does not contain channelUsername. Passing..")
+					continue
+				}
 				channelUsername := parts[1]
 
 				re = regexp.MustCompile("^Forwarded from (.*?)\\n\\n")
@@ -45,10 +49,14 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 				if len(parts) > 0 {
 					channelTitle = parts[1]
 				} else {
+					log.Println("Could not resolve channelTitle from the Message.Text. Taking channelUsername as channelTitle..")
 					channelTitle = channelUsername
 				}
 
-				db.DeleteChatChannel(int(chatID), channelUsername)
+				err = db.DeleteChatChannel(int(chatID), channelUsername)
+				if err != nil {
+					log.Println(err)
+				}
 				answerText := fmt.Sprintf("Successfully unsubscribed from %s", channelTitle)
 
 				callbackData := fmt.Sprintf("subscribe-%s", channelUsername)
@@ -72,10 +80,16 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 					update.CallbackQuery.ID,
 					answerText,
 				))
+				continue
 			}
+
 			re = regexp.MustCompile("^subscribe-(.*?)$")
 			if re.MatchString(update.CallbackQuery.Data) {
 				parts := re.FindStringSubmatch(update.CallbackQuery.Data)
+				if len(parts) == 0 {
+					log.Println("Subscribe callback query does not contain channelUsername. Passing..")
+					continue
+				}
 				channelUsername := parts[1]
 
 				re = regexp.MustCompile("^Forwarded from (.*?)\\n\\n")
@@ -87,7 +101,10 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 					channelTitle = channelUsername
 				}
 
-				db.PutChatChannel(int(chatID), channelUsername)
+				err = db.PutChatChannel(int(chatID), channelUsername)
+				if err != nil {
+					log.Println(err)
+				}
 				answerText := fmt.Sprintf("Successfully subscribed to %s", channelTitle)
 
 				callbackData := fmt.Sprintf("unsubscribe-%s", channelUsername)
@@ -111,6 +128,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 					update.CallbackQuery.ID,
 					answerText,
 				))
+				continue
 			}
 		}
 		if update.Message != nil {
@@ -130,7 +148,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						}
 						msgText += "\nReply to a forwarded message to unsubscribe from that channel"
 					} else {
-						msgText = "You're not yet subscribed to any channle. Forward me a message from any channel And I'll feed you here new posts from there!"
+						msgText = "You're subscribed no channel yet. Forward me a message from any channel and I'll feed you here new posts from there!"
 					}
 					msg := tgbotapi.NewMessage(
 						update.Message.Chat.ID,
@@ -149,13 +167,21 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 					}
 
 				}
-			} else if update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.From.UserName == "unifeed_bot" && update.Message.ReplyToMessage.Entities != nil {
+			} else if update.Message.ReplyToMessage != nil &&
+				update.Message.ReplyToMessage.From.UserName == "unifeed_bot" &&
+				update.Message.ReplyToMessage.Entities != nil {
 				entities := *update.Message.ReplyToMessage.Entities
 				var ent tgbotapi.MessageEntity
 				if len(entities) == 0 {
+					log.Println("EEntities are not nil but empty. Passing..")
 					continue
 				} else {
 					ent = entities[0]
+				}
+				urlParts := strings.Split(ent.URL, "/")
+				if len(urlParts) < 4 {
+					log.Println("URL from the entities is corrupt: ", ent.URL)
+					continue
 				}
 				channelUsername := strings.Split(ent.URL, "/")[3]
 
@@ -183,7 +209,11 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						},
 					}},
 				}
-				bot.Send(msg)
+				_, err = bot.Send(msg)
+				if err != nil {
+					log.Println(err)
+				}
+				continue
 			} else if update.Message.ForwardFromChat != nil &&
 				update.Message.ForwardFromChat.IsChannel() &&
 				!update.Message.From.IsBot {
@@ -203,22 +233,24 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						}
 					} else {
 						msgText = fmt.Sprintf(
-							"I've added *%s* channel to your feed list. Reply to any message from this chat with _unsubscribe_ message to unsubscribe",
+							"I've added *%s* channel to your feed list. Reply to any message from this channel to unsubscribe",
 							update.Message.ForwardFromChat.Title,
 						)
 					}
 					ch <- update.Message.ForwardFromChat.UserName
 					msg := tgbotapi.NewMessage(update.Message.Chat.ID, msgText)
 					msg.ParseMode = "markdown"
-					bot.Send(msg)
+					_, err = bot.Send(msg)
+					if err != nil {
+						log.Println(err)
+					}
+					continue
 				} else {
-					log.Println(update.Message.Chat.ID)
 					chatIDs, err := db.GetChatsByChannel(update.Message.ForwardFromChat.UserName)
 					if err != nil {
 						log.Println(err)
 						continue
 					}
-					log.Println("Chat IDs from the DB: ", chatIDs)
 					msgText := fmt.Sprintf(
 						"[Forwarded from %s](https://t.me/%s/%d)",
 						update.Message.ForwardFromChat.Title,
@@ -234,7 +266,10 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 							msgText,
 						)
 						msg.ParseMode = "markdown"
-						bot.Send(msg)
+						_, err = bot.Send(msg)
+						if err != nil {
+							log.Println("Redistributing post error", err, "ChatID:", chatID)
+						}
 					}
 				}
 			}
@@ -242,7 +277,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 	}
 }
 
-func botLoop(ch chan string) *tgbotapi.BotAPI {
+func botLoop(ch chan string) {
 
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("UNIFEED_TELEGRAM_BOT_API_TOKEN"))
 	if err != nil {
@@ -258,30 +293,15 @@ func botLoop(ch chan string) *tgbotapi.BotAPI {
 	bot.Debug = debug
 
 	var updates tgbotapi.UpdatesChannel
-	// if !debug {
-	// 	_, err = bot.SetWebhook(tgbotapi.NewWebhook(fmt.Sprintf("https://%s.herokuapp.com/%s", os.Getenv("HEROKU_APP_NAME"), bot.Token)))
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// 	info, err := bot.GetWebhookInfo()
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// 	if info.LastErrorDate != 0 {
-	// 		log.Printf("Telegram callback failed: %s", info.LastErrorMessage)
-	// 	}
-	// 	updates = bot.ListenForWebhook("/" + bot.Token)
-	// } else {
-	// _, err = bot.RemoveWebhook()
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates, err = bot.GetUpdatesChan(u)
-	// }
 
 	for w := 0; w < runtime.NumCPU()+2; w++ {
 		go processBot(bot, updates, ch)
 	}
-	return bot
+	c := make(chan struct{})
+	<-c
 }
 
 func subscriptionLoop(tdlibClient *client.Client, ch chan string) {
@@ -364,38 +384,28 @@ func tdlibMain() {
 
 	ch := make(chan string)
 	go subscriptionLoop(tdlibClient, ch)
-	botLoop(ch)
+	go botLoop(ch)
 
 	for update := range listener.Updates {
 		if update.GetClass() == client.ClassUpdate {
-			log.Printf("%#v", update)
-			if update.GetType() == "updateSupergroupFullInfo" {
-				fullInfoUpd, ok := update.(*client.UpdateSupergroupFullInfo)
-				if !ok {
-					continue
-				}
-				log.Printf("%#v", fullInfoUpd.SupergroupFullInfo)
-
-			} else if update.GetType() == "updateNewMessage" {
+			if update.GetType() == "updateNewMessage" {
 				newMessageUpdate, ok := update.(*client.UpdateNewMessage)
 				if !ok {
 					continue
 				}
 				if newMessageUpdate.Message != nil && newMessageUpdate.Message.CanBeForwarded && newMessageUpdate.Message.IsChannelPost {
 					log.Printf("Message from channel %#v. Id: %#v. Content Type: %s\n", newMessageUpdate.Message.ChatId, newMessageUpdate.Message.Id, newMessageUpdate.Message.Content.MessageContentType())
-					log.Println(newMessageUpdate.Message.Sender.MessageSenderType())
 					unifeedUserToBotChatID, _ := strconv.Atoi(os.Getenv("UNIFEED_USER_TO_BOT_CHAT_ID"))
 					fwdReq := &client.ForwardMessagesRequest{
 						ChatId:     int64(unifeedUserToBotChatID),
 						FromChatId: newMessageUpdate.Message.ChatId,
 						MessageIds: []int64{newMessageUpdate.Message.Id},
 					}
-					msgs, err := tdlibClient.ForwardMessages(fwdReq)
+					_, err := tdlibClient.ForwardMessages(fwdReq)
 					if err != nil {
 						log.Println(err)
 						continue
 					}
-					log.Println(msgs)
 				}
 			}
 		}
@@ -437,5 +447,4 @@ func main() {
 	}
 
 	tdlibMain()
-
 }
