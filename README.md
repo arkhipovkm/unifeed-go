@@ -42,10 +42,12 @@ On the first launch there is no ./tdlib database yet so you'll need to login int
 docker attach unifeed-bot
 ```
 
-Nothing will show up, just type in your dummy account's phone number and hit enter. The app will ask for verification code. Type it in and hit Enter:
+Nothing will show up, just type in your dummy account's phone number and hit enter. The app will ask for verification code. Type it in and hit Enter.
+
+Once you're logged in, DON'T PRESS `Ctrl+C` or `exit`. This will exit the container. Press `Ctrl+P` then `Ctrl+Q` to **detach** from container and not **kill** it.
 
 Congratulations! You're all set up!
 
 This manipulation is only needed on the first setup.
 
-There is a known [issue](https://github.com/tdlib/td/issues/791) in tdlib which results in error when the dummy user tries to forward posts to the bot. THis is because bot's chatID is still not in the tdlib database. To resolve the bug, send any message to your bot using a dummy account.
+There is a known [issue](https://github.com/tdlib/td/issues/791) in tdlib which results in error when the dummy user tries to forward posts to the bot. This is because bot's chatID is still not in the tdlib database. To resolve the bug, send any message to your bot using a dummy account.
