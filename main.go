@@ -16,10 +16,77 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
+type Replics struct {
+	Help                           string
+	SubscriptionsHeader            string
+	SubscriptionsFooter            string
+	SubscriptionsDefault           string
+	SuccessfullySubscribed         string
+	AlreadySubscribed              string
+	ReplyToSubscribed              string
+	ReplyToNoLongerSubscribed      string
+	ReplyButtonSubscribe           string
+	ReplyButtonUnsubscribe         string
+	AnswerSuccessfullySubscribed   string
+	AnswerSuccessfullyUnsubscribed string
+}
+
+var replicsLangMap = map[string]*Replics{
+	"ru": {
+		Help:                           "Привет, это %s! Этот бот помогает вам собрать ваши любимые каналы в одну ленту. Вы можете подписаться на любой канал, просто переслав из него сообщение боту.\n\nКоманды:\n/subscriptions - список моих подписок",
+		SubscriptionsHeader:            "Вы подписаны на следующие каналы:\n\n",
+		SubscriptionsFooter:            "\nЧтобы отписаться, просто ответьте на любое сообщение из канала в ленте и нажмите \"Отписаться\".",
+		SubscriptionsDefault:           "Вы пока ни на что не подписаны. Вы можете подписаться на любой канал, просто переслав из него сообщение боту.",
+		SuccessfullySubscribed:         "Я добавил канал *%s* в список ваших подписок. Чтобы отписаться, ответьте на любое сообщение, пересланные с этого канала и нажмите \"Отписаться\".",
+		AlreadySubscribed:              "Вы уже подписаны на канал *%s*. Чтобы отписаться, ответьте на любое сообщение, пересланные с этого канала и нажмите \"Отписаться\".",
+		ReplyToSubscribed:              "Вы подписаны на %s",
+		ReplyToNoLongerSubscribed:      "Вы больше не подписаны на %s",
+		AnswerSuccessfullyUnsubscribed: "Вы успешно отписались от %s",
+		AnswerSuccessfullySubscribed:   "Вы снова подписаны на %s",
+		ReplyButtonSubscribe:           "Подписаться",
+		ReplyButtonUnsubscribe:         "Отписаться",
+	},
+	"en": {
+		Help:                           "Hi, its the %s! This bot helps you gather your favorite channels into one feed. To subscribe to a channel, simply forward me a message from there.\n\nCommands:\n/subscriptions - list the channels I'm subscribed to",
+		SubscriptionsHeader:            "You're subscribed to the following channels:\n\n",
+		SubscriptionsFooter:            "\nReply to a forwarded message to unsubscribe from that channel.",
+		SubscriptionsDefault:           "You're subscribed to no channel yet. Forward me a message from any channel and I'll feed you here new posts from there!",
+		SuccessfullySubscribed:         "I've added *%s* channel to your feed list. Reply to any message from this channel to unsubscribe",
+		AlreadySubscribed:              "You've already subscribed to *%s*. \nReply to %s's messages to unsubscribe.\nEnlist /subscriptions.",
+		ReplyToSubscribed:              "You're subscribed to %s",
+		ReplyToNoLongerSubscribed:      "You're no longer subscribed to %s",
+		AnswerSuccessfullyUnsubscribed: "Successfully unsubscribed from %s",
+		AnswerSuccessfullySubscribed:   "Successfully re-subscribed to %s",
+		ReplyButtonSubscribe:           "Subscribe",
+		ReplyButtonUnsubscribe:         "Unsubscribe",
+	},
+}
+
+func getReplics(update tgbotapi.Update) *Replics {
+	var languageCode string
+	if update.Message != nil && update.Message.From != nil {
+		languageCode = update.Message.From.LanguageCode
+	} else if update.CallbackQuery != nil && update.CallbackQuery.From != nil {
+		languageCode = update.CallbackQuery.From.LanguageCode
+	}
+
+	var replics *Replics
+	for k, v := range replicsLangMap {
+		if k == languageCode {
+			replics = v
+		}
+	}
+	if replics == nil {
+		replics = replicsLangMap["en"]
+	}
+	return replics
+}
+
 func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan string) {
 	var err error
 	unifeedBotToUserChatID, _ := strconv.Atoi(os.Getenv("UNIFEED_BOT_TO_USER_CHAT_ID"))
 	for update := range updates {
+		replics := getReplics(update)
 		if update.CallbackQuery != nil && update.CallbackQuery.Data != "" && update.CallbackQuery.Message != nil {
 			var chatID int64
 			if update.CallbackQuery.Message != nil &&
@@ -57,7 +124,6 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 				if err != nil {
 					log.Println(err)
 				}
-				answerText := fmt.Sprintf("Successfully unsubscribed from %s", channelTitle)
 
 				callbackData := fmt.Sprintf("subscribe-%s", channelUsername)
 				editMsg := &tgbotapi.EditMessageTextConfig{
@@ -67,18 +133,18 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						ReplyMarkup: &tgbotapi.InlineKeyboardMarkup{
 							InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{{
 								tgbotapi.InlineKeyboardButton{
-									Text:         "Subscribe",
+									Text:         replics.ReplyButtonSubscribe,
 									CallbackData: &callbackData,
 								},
 							}},
 						},
 					},
-					Text: fmt.Sprintf("You're no longer subscribed to %s", channelTitle),
+					Text: fmt.Sprintf(replics.ReplyToNoLongerSubscribed, channelTitle),
 				}
 				bot.Send(editMsg)
 				bot.AnswerCallbackQuery(tgbotapi.NewCallback(
 					update.CallbackQuery.ID,
-					answerText,
+					fmt.Sprintf(replics.AnswerSuccessfullyUnsubscribed, channelTitle),
 				))
 				continue
 			}
@@ -105,7 +171,6 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 				if err != nil {
 					log.Println(err)
 				}
-				answerText := fmt.Sprintf("Successfully subscribed to %s", channelTitle)
 
 				callbackData := fmt.Sprintf("unsubscribe-%s", channelUsername)
 				editMsg := &tgbotapi.EditMessageTextConfig{
@@ -115,18 +180,18 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						ReplyMarkup: &tgbotapi.InlineKeyboardMarkup{
 							InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{{
 								tgbotapi.InlineKeyboardButton{
-									Text:         "Unsubscribe",
+									Text:         replics.ReplyButtonUnsubscribe,
 									CallbackData: &callbackData,
 								},
 							}},
 						},
 					},
-					Text: fmt.Sprintf("You're subscribed to %s", channelTitle),
+					Text: fmt.Sprintf(replics.ReplyToSubscribed, channelTitle),
 				}
 				bot.Send(editMsg)
 				bot.AnswerCallbackQuery(tgbotapi.NewCallback(
 					update.CallbackQuery.ID,
-					answerText,
+					fmt.Sprintf(replics.AnswerSuccessfullySubscribed, channelTitle),
 				))
 				continue
 			}
@@ -141,14 +206,17 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						continue
 					}
 					var msgText = ""
+
 					if len(channels) > 0 {
-						msgText = "You're currently subscribed to the following channels:\n\n"
+						msgText = replics.SubscriptionsHeader
 						for _, channel := range channels {
-							msgText += "@" + channel + "\n"
+							if channel != "" {
+								msgText += "@" + channel + "\n"
+							}
 						}
-						msgText += "\nReply to a forwarded message to unsubscribe from that channel"
+						msgText += replics.SubscriptionsFooter
 					} else {
-						msgText = "You're subscribed no channel yet. Forward me a message from any channel and I'll feed you here new posts from there!"
+						msgText = replics.SubscriptionsDefault
 					}
 					msg := tgbotapi.NewMessage(
 						update.Message.Chat.ID,
@@ -158,7 +226,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 				default:
 					msg := tgbotapi.NewMessage(
 						update.Message.Chat.ID,
-						"Hi, its the UniFeed Bot! Forward me a message from any channel And I'll feed you here new posts from there!",
+						fmt.Sprintf(replics.Help, bot.Self.FirstName),
 					)
 					_, err = bot.Send(msg)
 					if err != nil {
@@ -168,12 +236,12 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 
 				}
 			} else if update.Message.ReplyToMessage != nil &&
-				update.Message.ReplyToMessage.From.UserName == "unifeed_bot" &&
+				update.Message.ReplyToMessage.From.UserName == bot.Self.UserName &&
 				update.Message.ReplyToMessage.Entities != nil {
 				entities := *update.Message.ReplyToMessage.Entities
 				var ent tgbotapi.MessageEntity
 				if len(entities) == 0 {
-					log.Println("EEntities are not nil but empty. Passing..")
+					log.Println("Entities are not nil but empty. Passing..")
 					continue
 				} else {
 					ent = entities[0]
@@ -196,7 +264,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 
 				msg := tgbotapi.NewMessage(
 					update.Message.Chat.ID,
-					fmt.Sprintf("You're subscribed to %s", channelTitle),
+					fmt.Sprintf(replics.ReplyToSubscribed, channelTitle),
 				)
 
 				callbackData := fmt.Sprintf("unsubscribe-%s", channelUsername)
@@ -204,7 +272,7 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 				msg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{
 					InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{{
 						tgbotapi.InlineKeyboardButton{
-							Text:         "Unsubscribe",
+							Text:         replics.ReplyButtonUnsubscribe,
 							CallbackData: &callbackData,
 						},
 					}},
@@ -226,14 +294,14 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 							continue
 						}
 						if me.Number == 1062 {
-							msgText = fmt.Sprintf("You've already subscribed to *%s*. \nReply to %s's messages to unsubscribe.\nEnlist /subscriptions.", update.Message.ForwardFromChat.Title, update.Message.ForwardFromChat.Title)
+							msgText = fmt.Sprintf(replics.AlreadySubscribed, update.Message.ForwardFromChat.Title, update.Message.ForwardFromChat.Title)
 						} else {
 							log.Println(err)
 							continue
 						}
 					} else {
 						msgText = fmt.Sprintf(
-							"I've added *%s* channel to your feed list. Reply to any message from this channel to unsubscribe",
+							replics.SuccessfullySubscribed,
 							update.Message.ForwardFromChat.Title,
 						)
 					}
@@ -251,14 +319,50 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 						log.Println(err)
 						continue
 					}
+
+					var actualMessageText string = update.Message.Text
+
+					if update.Message.Entities != nil {
+
+						var offsets []int
+						for _, entity := range *update.Message.Entities {
+							if entity.Type == "text_link" {
+								offsets = append(offsets, entity.Offset)
+							}
+						}
+
+						var newMessageTextRunes []rune
+						for i, char := range []rune(update.Message.Text) {
+							entityFound := false
+							for _, entity := range *update.Message.Entities {
+								if entity.Type == "text_link" {
+									if i == entity.Offset {
+										oldLinkText := []rune(update.Message.Text)[entity.Offset : entity.Offset+entity.Length]
+										newLinkText := fmt.Sprintf("[%s](%s)", string(oldLinkText), entity.URL)
+										for _, newChar := range []rune(newLinkText) {
+											newMessageTextRunes = append(newMessageTextRunes, newChar)
+										}
+										entityFound = true
+									} else if i > entity.Offset && i < entity.Offset+entity.Length {
+										entityFound = true
+									}
+								}
+							}
+							if !entityFound {
+								newMessageTextRunes = append(newMessageTextRunes, char)
+							}
+						}
+						actualMessageText = string(newMessageTextRunes)
+					}
+
 					msgText := fmt.Sprintf(
 						"[Forwarded from %s](https://t.me/%s/%d)",
 						update.Message.ForwardFromChat.Title,
 						update.Message.ForwardFromChat.UserName,
 						update.Message.ForwardFromMessageID,
 					)
-					if update.Message.Text != "" {
-						msgText += "\n\n" + update.Message.Text
+					if actualMessageText != "" {
+						msgText += "\n\n" + actualMessageText
 					}
 					for _, chatID := range chatIDs {
 						msg := tgbotapi.NewMessage(
@@ -292,6 +396,7 @@ func botLoop(ch chan string) {
 	}
 	bot.Debug = debug
 
+	bot.RemoveWebhook()
 	var updates tgbotapi.UpdatesChannel
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
