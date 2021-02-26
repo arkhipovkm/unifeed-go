@@ -20,7 +20,7 @@ func init() {
 			dsn,
 		)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 		err = DB.Ping()
 		if err != nil {
