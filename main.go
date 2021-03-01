@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/arkhipovkm/unifeed-go/db"
 	"github.com/go-sql-driver/mysql"
@@ -323,24 +324,24 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 					var actualMessageText string = update.Message.Text
 
 					if update.Message.Entities != nil {
-
-						var offsets []int
-						for _, entity := range *update.Message.Entities {
-							if entity.Type == "text_link" {
-								offsets = append(offsets, entity.Offset)
-							}
-						}
-
+						// Offsets of telegram entities are counted in UTF16 code units so we must encode them in UTF16 to properly count offsets and lengths
+						// Problems appear on characters with >2 bytes
+						TextInUTF16CodeUnits := utf16.Encode([]rune(update.Message.Text))
 						var newMessageTextRunes []rune
-						for i, char := range []rune(update.Message.Text) {
+						for i := range TextInUTF16CodeUnits {
 							entityFound := false
 							for _, entity := range *update.Message.Entities {
 								if entity.Type == "text_link" {
 									if i == entity.Offset {
-										oldLinkText := []rune(update.Message.Text)[entity.Offset : entity.Offset+entity.Length]
-										newLinkText := fmt.Sprintf("[%s](%s)", string(oldLinkText), entity.URL)
-										for _, newChar := range []rune(newLinkText) {
-											newMessageTextRunes = append(newMessageTextRunes, newChar)
+										oldLinkTextUTF16 := TextInUTF16CodeUnits[entity.Offset : entity.Offset+entity.Length]
+										oldLinkTextRunes := utf16.Decode(oldLinkTextUTF16)
+										oldLinkTextString := string(oldLinkTextRunes)
+
+										newLinkTextString := fmt.Sprintf("[%s](%s)", oldLinkTextString, entity.URL)
+										newLinkTextRunes := []rune(newLinkTextString)
+
+										for _, newRune := range newLinkTextRunes {
+											newMessageTextRunes = append(newMessageTextRunes, newRune)
 										}
 										entityFound = true
 									} else if i > entity.Offset && i < entity.Offset+entity.Length {
@@ -349,7 +350,19 @@ func processBot(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, ch chan s
 								}
 							}
 							if !entityFound {
-								newMessageTextRunes = append(newMessageTextRunes, char)
+								var oldRune rune
+								if utf16.IsSurrogate(rune(TextInUTF16CodeUnits[i])) {
+									oldRune = utf16.DecodeRune(
+										rune(TextInUTF16CodeUnits[i]),
+										rune(TextInUTF16CodeUnits[i+1]),
+									)
+									if oldRune == 65533 { // Replacement character U+FFFD. Appears on the second code unit of a surrogate
+										continue
+									}
+								} else {
+									oldRune = utf16.Decode(TextInUTF16CodeUnits[i : i+1])[0]
+								}
+								newMessageTextRunes = append(newMessageTextRunes, oldRune)
 							}
 						}
 						actualMessageText = string(newMessageTextRunes)
